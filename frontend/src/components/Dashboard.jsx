@@ -1,220 +1,147 @@
-import React, { useState, useEffect } from 'react';
-import axios from 'axios';
-import {
-  TruckIcon,
-  TicketIcon,
-  CheckCircleIcon,
-  CurrencyDollarIcon,
-  ArrowPathIcon,
-  PlusIcon
-} from '@heroicons/react/24/outline';
+import { useState, useEffect } from 'react'
+import axios from 'axios'
 
-const Dashboard = () => {
+function Dashboard() {
   const [stats, setStats] = useState({
-    totalVehicles: 0,
-    activeTickets: 0,
-    completedTickets: 0,
-    totalRevenue: 0
-  });
-  const [recentTickets, setRecentTickets] = useState([]);
-  const [loading, setLoading] = useState(true);
+    todayTransactions: 0,
+    todaySales: 0,
+    totalLiters: 0,
+    pendingTasks: 0
+  })
+  const [recentTransactions, setRecentTransactions] = useState([])
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    fetchDashboardData();
-  }, []);
+    fetchDashboardData()
+  }, [])
 
   const fetchDashboardData = async () => {
     try {
-      setLoading(true);
+      const [reportRes, transactionsRes, tasksRes] = await Promise.all([
+        axios.get('/api/report/daily'),
+        axios.get('/api/transactions'),
+        axios.get('/api/tasks')
+      ])
 
-      // Fetch vehicles count
-      const vehiclesResponse = await axios.get('/api/vehicles');
-
-      // Fetch tickets
-      const ticketsResponse = await axios.get('/api/tickets');
-      const tickets = ticketsResponse.data;
-
-      // Fetch payments
-      const paymentsResponse = await axios.get('/api/payments');
-      const payments = paymentsResponse.data;
-
-      // Calculate stats
-      const activeTickets = tickets.filter(ticket => ticket.Status === 'ACTIVE').length;
-      const completedTickets = tickets.filter(ticket => ticket.Status === 'COMPLETED').length;
-      const totalRevenue = payments.reduce((sum, payment) => sum + parseFloat(payment.AmountPaid), 0);
+      const report = reportRes.data
+      const transactions = transactionsRes.data
+      const tasks = tasksRes.data
 
       setStats({
-        totalVehicles: vehiclesResponse.data.length,
-        activeTickets,
-        completedTickets,
-        totalRevenue
-      });
+        todayTransactions: report.transactions[0]?.count || 0,
+        todaySales: report.transactions[0]?.totalSales || 0,
+        totalLiters: report.transactions[0]?.totalLiters || 0,
+        pendingTasks: tasks.filter(task => task.Status === 'Pending').length
+      })
 
-      // Get recent tickets (last 5)
-      setRecentTickets(tickets.slice(0, 5));
-
+      setRecentTransactions(transactions.slice(0, 5))
     } catch (error) {
-      console.error('Error fetching dashboard data:', error);
+      console.error('Error fetching dashboard data:', error)
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  };
-
-  const StatCard = ({ title, value, icon: IconComponent, color }) => (
-    <div className="stat-card">
-      <div className="flex items-center">
-        <div className={`flex-shrink-0 p-4 rounded-lg ${color}`}>
-          <IconComponent className="w-8 h-8 text-white" />
-        </div>
-        <div className="ml-4">
-          <p className="text-sm font-medium text-gray-600">{title}</p>
-          <p className="text-2xl font-bold text-gray-900">{value}</p>
-        </div>
-      </div>
-    </div>
-  );
+  }
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="flat-card">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto"></div>
-          <p className="text-gray-700 mt-4 text-center">Loading dashboard...</p>
-        </div>
+      <div className="flex items-center justify-center h-30">
+        <div className="text-2xl font-black text-gray-600">Loading Dashboard...</div>
       </div>
-    );
+    )
   }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flat-card">
-        <h1 className="text-4xl font-bold text-gray-900">Dashboard</h1>
-        <p className="mt-2 text-gray-600 text-lg">Welcome to SmartPark Parking Ticket Management System</p>
+    <div className="space-y-8 bg-neutral-50 min-h-screen p-8 rounded-3xl">
+      <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center mb-8">
+        <div>
+          <h1 className="text-8xl font-black text-neutral-900 tracking-tight mb-4">DASHBOARD</h1>
+          <p className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-blue-800 bg-clip-text text-transparent tracking-wider uppercase">
+            Gas Station Control Center
+          </p>
+        </div>
+        <div className="mt-6 xl:mt-0 text-right">
+          <p className="text-4xl font-black text-gray-800 tracking-wide">
+            {new Date().toLocaleDateString('en-US', {
+              weekday: 'long',
+              month: 'long',
+              day: 'numeric'
+            })}
+          </p>
+          <p className="text-2xl font-bold text-gray-600">
+            {new Date().getFullYear()}
+          </p>
+        </div>
       </div>
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <StatCard
-          title="Total Vehicles"
-          value={stats.totalVehicles}
-          icon={TruckIcon}
-          color="bg-blue-500"
-        />
-        <StatCard
-          title="Active Tickets"
-          value={stats.activeTickets}
-          icon={TicketIcon}
-          color="bg-green-500"
-        />
-        <StatCard
-          title="Completed Tickets"
-          value={stats.completedTickets}
-          icon={CheckCircleIcon}
-          color="bg-yellow-500"
-        />
-        <StatCard
-          title="Total Revenue"
-          value={`₦${stats.totalRevenue.toLocaleString()}`}
-          icon={CurrencyDollarIcon}
-          color="bg-purple-500"
-        />
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-8">
+        <div className="bg-gradient-to-br from-blue-600 to-blue-800 text-white p-8 rounded-3xl shadow-2xl border-8 border-white/20 transform hover:scale-105 transition-all duration-500">
+          <h3 className="text-2xl font-black mb-6 tracking-wider uppercase">Today's Transactions</h3>
+          <p className="text-8xl font-black mb-4">{stats.todayTransactions}</p>
+          <p className="text-xl font-bold opacity-90 uppercase tracking-wide">Total Count</p>
+        </div>
+
+        <div className="bg-gradient-to-br from-green-600 to-green-800 text-white p-8 rounded-3xl shadow-2xl border-8 border-white/20 transform hover:scale-105 transition-all duration-500">
+          <h3 className="text-2xl font-black mb-6 tracking-wider uppercase">Today's Sales</h3>
+          <p className="text-6xl font-black mb-4">{stats.todaySales.toLocaleString()}</p>
+          <p className="text-xl font-bold opacity-90 uppercase tracking-wide">RWF Revenue</p>
+        </div>
+
+        <div className="bg-gradient-to-br from-purple-600 to-purple-800 text-white p-8 rounded-3xl shadow-2xl border-8 border-white/20 transform hover:scale-105 transition-all duration-500">
+          <h3 className="text-2xl font-black mb-6 tracking-wider uppercase">Total Liters</h3>
+          <p className="text-8xl font-black mb-4">{stats.totalLiters.toFixed(1)}</p>
+          <p className="text-xl font-bold opacity-90 uppercase tracking-wide">Liters Sold</p>
+        </div>
+
+        <div className="bg-gradient-to-br from-red-600 to-red-800 text-white p-8 rounded-3xl shadow-2xl border-8 border-white/20 transform hover:scale-105 transition-all duration-500">
+          <h3 className="text-2xl font-black mb-6 tracking-wider uppercase">Pending Tasks</h3>
+          <p className="text-8xl font-black mb-4">{stats.pendingTasks}</p>
+          <p className="text-xl font-bold opacity-90 uppercase tracking-wide">Action Required</p>
+        </div>
       </div>
 
-      {/* Recent Activity */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Recent Tickets */}
-        <div className="flat-card">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-gray-900">Recent Tickets</h2>
-            <button
-              onClick={fetchDashboardData}
-              className="btn-secondary px-3 py-1 text-sm flex items-center"
-            >
-              <ArrowPathIcon className="w-4 h-4 mr-1" />
-              Refresh
-            </button>
-          </div>
-
-          {recentTickets.length === 0 ? (
-            <p className="text-gray-500 text-center py-4">No tickets found</p>
-          ) : (
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <div className="card">
+          <h2 className="text-2xl font-black text-gray-800 mb-6">RECENT TRANSACTIONS</h2>
+          {recentTransactions.length > 0 ? (
             <div className="space-y-3">
-              {recentTickets.map((ticket) => (
-                <div key={ticket.TicketNumber} className="bg-gray-50 rounded-lg p-4 hover:bg-gray-100 transition-colors duration-200">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium text-gray-900">#{ticket.TicketNumber}</p>
-                      <p className="text-sm text-gray-600">{ticket.PlateNumber}</p>
-                      <p className="text-xs text-gray-500">
-                        {new Date(ticket.EntryTime).toLocaleString()}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                        ticket.Status === 'ACTIVE'
-                          ? 'badge-success'
-                          : 'badge-gray'
-                      }`}>
-                        {ticket.Status}
-                      </span>
-                      {ticket.TotalFee && (
-                        <p className="text-sm font-medium text-gray-900 mt-1">
-                          ₦{parseFloat(ticket.TotalFee).toLocaleString()}
-                        </p>
-                      )}
-                    </div>
+              {recentTransactions.map((transaction) => (
+                <div key={transaction.TransactionID} className="flex justify-between items-center p-4 bg-gray-50 rounded-lg border-2 border-gray-200">
+                  <div>
+                    <p className="font-bold text-gray-800">{transaction.CustomerName}</p>
+                    <p className="text-sm font-semibold text-gray-600">{transaction.FuelTypeName} - {transaction.PumpNumber}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-black text-lg text-green-600">{transaction.TotalPrice.toLocaleString()} RWF</p>
+                    <p className="text-sm font-semibold text-gray-600">{transaction.AmountLiters}L</p>
                   </div>
                 </div>
               ))}
             </div>
+          ) : (
+            <p className="text-gray-600 font-semibold">No transactions today</p>
           )}
         </div>
 
-        {/* Quick Actions */}
-        <div className="flat-card">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h2>
-          <div className="space-y-3">
-            <button className="w-full btn-primary text-left flex items-center justify-start">
-              <TicketIcon className="w-5 h-5 mr-3" />
-              Issue New Parking Ticket
+        <div className="card">
+          <h2 className="text-2xl font-black text-gray-800 mb-6">QUICK ACTIONS</h2>
+          <div className="grid grid-cols-1 gap-4">
+            <button className="btn-primary text-left">
+              NEW TRANSACTION
             </button>
-            <button className="w-full btn-secondary text-left flex items-center justify-start">
-              <TruckIcon className="w-5 h-5 mr-3" />
-              Register New Vehicle
+            <button className="btn-secondary text-left">
+              ADD CUSTOMER
             </button>
-            <button className="w-full btn-info text-left flex items-center justify-start">
-              <CurrencyDollarIcon className="w-5 h-5 mr-3" />
-              Process Payment
+            <button className="btn-success text-left">
+              UPDATE INVENTORY
             </button>
-            <button className="w-full btn-success text-left flex items-center justify-start">
-              <ArrowPathIcon className="w-5 h-5 mr-3" />
-              Generate Report
+            <button className="btn-danger text-left">
+              VIEW REPORTS
             </button>
-          </div>
-        </div>
-      </div>
-
-      {/* System Status */}
-      <div className="flat-card">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">System Status</h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="flex items-center">
-            <div className="w-3 h-3 bg-green-500 rounded-full mr-3"></div>
-            <span className="text-sm text-gray-600">Database Connected</span>
-          </div>
-          <div className="flex items-center">
-            <div className="w-3 h-3 bg-green-500 rounded-full mr-3"></div>
-            <span className="text-sm text-gray-600">API Services Online</span>
-          </div>
-          <div className="flex items-center">
-            <div className="w-3 h-3 bg-green-500 rounded-full mr-3"></div>
-            <span className="text-sm text-gray-600">All Systems Operational</span>
           </div>
         </div>
       </div>
     </div>
-  );
-};
+  )
+}
 
-export default Dashboard;
+export default Dashboard

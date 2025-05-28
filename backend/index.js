@@ -1,6 +1,6 @@
 const express = require('express');
 const cors = require('cors');
-const mysql = require('mysql2');
+const mysql = require('mysql');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const session = require('express-session');
@@ -11,20 +11,15 @@ const PORT = process.env.PORT || 5000;
 
 // Middleware
 app.use(cors({
-  origin: 'http://localhost:5173', // Vite default port
+  origin: ['http://localhost:5173', 'http://localhost:5174'],
   credentials: true
 }));
 app.use(express.json());
-
-// Session middleware
 app.use(session({
-  secret: process.env.SESSION_SECRET || 'smartpark_session_secret',
+  secret: process.env.JWT_SECRET || 'gsms-secret-key',
   resave: false,
   saveUninitialized: false,
-  cookie: {
-    secure: false, // Set to true in production with HTTPS
-    maxAge: 24 * 60 * 60 * 1000 // 24 hours
-  }
+  cookie: { secure: false, maxAge: 24 * 60 * 60 * 1000 }
 }));
 
 // Database connection
@@ -32,416 +27,318 @@ const db = mysql.createConnection({
   host: process.env.DB_HOST || 'localhost',
   user: process.env.DB_USER || 'root',
   password: process.env.DB_PASSWORD || '',
-  database: process.env.DB_NAME || 'PTMS'
+  database: process.env.DB_NAME || 'your_database'
 });
 
-// Connect to database
+// Connect to database with better error handling
+let dbConnected = false;
 db.connect((err) => {
   if (err) {
-    console.error('Database connection failed:', err);
-    console.log('Continuing without database for testing...');
+    console.error('Database connection failed:', err.message);
+    console.log('Server will continue running without database connection');
+    console.log('Please set up MySQL and restart the server');
+    dbConnected = false;
     return;
   }
-  console.log('Connected to PTMS MySQL database');
+  console.log('Connected to MySQL database');
+  dbConnected = true;
 });
 
-// Authentication middleware
-const authenticateToken = (req, res, next) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
-
-  if (!token) {
-    return res.status(401).json({ message: 'Access token required' });
+// Auth middleware
+const requireAuth = (req, res, next) => {
+  if (!req.session.userId) {
+    return res.status(401).json({ error: 'Authentication required' });
   }
-
-  jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
-    if (err) {
-      return res.status(403).json({ message: 'Invalid or expired token' });
-    }
-    req.user = user;
-    next();
-  });
+  next();
 };
 
-// Basic routes
-app.get('/', (req, res) => {
-  res.json({ message: 'SmartPark PTMS Backend Server is running!' });
+// Test endpoint to check database
+app.get('/api/test-db', (req, res) => {
+  if (!dbConnected) {
+    return res.status(500).json({ error: 'Database not connected' });
+  }
+
+  db.query('SELECT * FROM User', (err, results) => {
+    if (err) {
+      return res.status(500).json({ error: 'Database error: ' + err.message });
+    }
+    res.json({ message: 'Database connected', users: results });
+  });
 });
 
-app.get('/health', (req, res) => {
-  res.json({ status: 'OK', timestamp: new Date().toISOString() });
-});
-
-// ==================== AUTHENTICATION ROUTES ====================
-
-// Login route
-app.post('/api/auth/login', (req, res) => {
-  console.log('Login attempt:', req.body);
+// Auth routes
+app.post('/api/login', (req, res) => {
   const { username, password } = req.body;
 
-  if (!username || !password) {
-    console.log('Missing username or password');
-    return res.status(400).json({ message: 'Username and password are required' });
+  if (!dbConnected) {
+    return res.status(500).json({ error: 'Database not connected' });
   }
 
-  const query = 'SELECT * FROM User WHERE Username = ?';
-  console.log('Executing query for user:', username);
+  console.log('Login attempt:', { username, password });
 
-  db.query(query, [username], async (err, results) => {
+  db.query('SELECT * FROM User WHERE Username = ?', [username], (err, results) => {
     if (err) {
-      console.error('Database error:', err);
-      return res.status(500).json({ message: 'Internal server error' });
+      console.error('Database error during login:', err);
+      return res.status(500).json({ error: 'Database error: ' + err.message });
     }
 
-    console.log('Query results:', results.length, 'users found');
+    console.log('Query results:', results);
 
     if (results.length === 0) {
-      console.log('No user found with username:', username);
-      return res.status(401).json({ message: 'Invalid credentials' });
+      return res.status(401).json({ error: 'User not found' });
     }
 
-    const user = results[0];
-    console.log('User found:', user.Username, user.Role);
-
-    // For demo purposes, accept plain text password "admin123" or "receptionist123"
-    const isValidPassword = password === 'admin123' || password === 'receptionist123' ||
-                           await bcrypt.compare(password, user.Password);
-
-    console.log('Password validation result:', isValidPassword);
-
-    if (!isValidPassword) {
-      console.log('Invalid password for user:', username);
-      return res.status(401).json({ message: 'Invalid credentials' });
+    if (results[0].Password !== password) {
+      return res.status(401).json({ error: 'Invalid password' });
     }
 
-    // Generate JWT token
-    const token = jwt.sign(
-      {
-        userId: user.UserID,
-        username: user.Username,
-        role: user.Role
-      },
-      process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRES_IN || '24h' }
-    );
-
-    // Store user in session
-    req.session.user = {
-      userId: user.UserID,
-      username: user.Username,
-      fullName: user.FullName,
-      role: user.Role
-    };
-
-    res.json({
-      message: 'Login successful',
-      token,
-      user: {
-        userId: user.UserID,
-        username: user.Username,
-        fullName: user.FullName,
-        role: user.Role
-      }
-    });
+    req.session.userId = results[0].UserID;
+    req.session.username = results[0].Username;
+    res.json({ message: 'Login successful', username: results[0].Username });
   });
 });
 
-// Logout route
-app.post('/api/auth/logout', (req, res) => {
-  req.session.destroy((err) => {
-    if (err) {
-      return res.status(500).json({ message: 'Could not log out' });
-    }
-    res.json({ message: 'Logout successful' });
-  });
+app.post('/api/logout', (req, res) => {
+  req.session.destroy();
+  res.json({ message: 'Logout successful' });
 });
 
-// Get current user
-app.get('/api/auth/me', authenticateToken, (req, res) => {
-  res.json({ user: req.user });
+app.get('/api/auth/check', (req, res) => {
+  if (req.session.userId) {
+    res.json({ authenticated: true, username: req.session.username });
+  } else {
+    res.json({ authenticated: false });
+  }
 });
 
-// ==================== PARKING PACKAGE ROUTES ====================
-
-// Get all parking packages
-app.get('/api/packages', authenticateToken, (req, res) => {
-  const query = 'SELECT * FROM ParkingPackage ORDER BY PackageNumber';
-
-  db.query(query, (err, results) => {
-    if (err) {
-      console.error('Database error:', err);
-      return res.status(500).json({ message: 'Internal server error' });
-    }
+// Fuel Types routes
+app.get('/api/fuel-types', requireAuth, (req, res) => {
+  db.query('SELECT * FROM FuelType', (err, results) => {
+    if (err) return res.status(500).json({ error: 'Database error' });
     res.json(results);
   });
 });
 
-// Get single parking package
-app.get('/api/packages/:id', authenticateToken, (req, res) => {
-  const packageId = req.params.id;
-  const query = 'SELECT * FROM ParkingPackage WHERE PackageNumber = ?';
-
-  db.query(query, [packageId], (err, results) => {
-    if (err) {
-      console.error('Database error:', err);
-      return res.status(500).json({ message: 'Internal server error' });
-    }
-
-    if (results.length === 0) {
-      return res.status(404).json({ message: 'Package not found' });
-    }
-
-    res.json(results[0]);
+app.post('/api/fuel-types', requireAuth, (req, res) => {
+  const { Name, PricePerLiter } = req.body;
+  db.query('INSERT INTO FuelType (Name, PricePerLiter) VALUES (?, ?)',
+    [Name, PricePerLiter], (err, result) => {
+    if (err) return res.status(500).json({ error: 'Database error' });
+    res.json({ message: 'Fuel type added', id: result.insertId });
   });
 });
 
-// Create new parking package
-app.post('/api/packages', authenticateToken, (req, res) => {
-  const { PackageName, PackageDescription, RatePerHour } = req.body;
-
-  if (!PackageName || !RatePerHour) {
-    return res.status(400).json({ message: 'Package name and rate per hour are required' });
-  }
-
-  const query = 'INSERT INTO ParkingPackage (PackageName, PackageDescription, RatePerHour) VALUES (?, ?, ?)';
-
-  db.query(query, [PackageName, PackageDescription, RatePerHour], (err, results) => {
-    if (err) {
-      console.error('Database error:', err);
-      return res.status(500).json({ message: 'Internal server error' });
-    }
-
-    res.status(201).json({
-      message: 'Package created successfully',
-      packageId: results.insertId
-    });
+app.put('/api/fuel-types/:id', requireAuth, (req, res) => {
+  const { Name, PricePerLiter } = req.body;
+  db.query('UPDATE FuelType SET Name = ?, PricePerLiter = ? WHERE FuelTypeID = ?',
+    [Name, PricePerLiter, req.params.id], (err) => {
+    if (err) return res.status(500).json({ error: 'Database error' });
+    res.json({ message: 'Fuel type updated' });
   });
 });
 
-// Update parking package
-app.put('/api/packages/:id', authenticateToken, (req, res) => {
-  const packageId = req.params.id;
-  const { PackageName, PackageDescription, RatePerHour } = req.body;
-
-  if (!PackageName || !RatePerHour) {
-    return res.status(400).json({ message: 'Package name and rate per hour are required' });
-  }
-
-  const query = 'UPDATE ParkingPackage SET PackageName = ?, PackageDescription = ?, RatePerHour = ? WHERE PackageNumber = ?';
-
-  db.query(query, [PackageName, PackageDescription, RatePerHour, packageId], (err, results) => {
-    if (err) {
-      console.error('Database error:', err);
-      return res.status(500).json({ message: 'Internal server error' });
-    }
-
-    if (results.affectedRows === 0) {
-      return res.status(404).json({ message: 'Package not found' });
-    }
-
-    res.json({ message: 'Package updated successfully' });
+app.delete('/api/fuel-types/:id', requireAuth, (req, res) => {
+  db.query('DELETE FROM FuelType WHERE FuelTypeID = ?', [req.params.id], (err) => {
+    if (err) return res.status(500).json({ error: 'Database error' });
+    res.json({ message: 'Fuel type deleted' });
   });
 });
 
-// Delete parking package
-app.delete('/api/packages/:id', authenticateToken, (req, res) => {
-  const packageId = req.params.id;
-
-  // Check if package is being used by any tickets
-  const checkQuery = 'SELECT COUNT(*) as count FROM ParkingTicket WHERE PackageNumber = ?';
-
-  db.query(checkQuery, [packageId], (err, results) => {
-    if (err) {
-      console.error('Database error:', err);
-      return res.status(500).json({ message: 'Internal server error' });
-    }
-
-    if (results[0].count > 0) {
-      return res.status(400).json({ message: 'Cannot delete package that is being used by tickets' });
-    }
-
-    const deleteQuery = 'DELETE FROM ParkingPackage WHERE PackageNumber = ?';
-
-    db.query(deleteQuery, [packageId], (err, results) => {
-      if (err) {
-        console.error('Database error:', err);
-        return res.status(500).json({ message: 'Internal server error' });
-      }
-
-      if (results.affectedRows === 0) {
-        return res.status(404).json({ message: 'Package not found' });
-      }
-
-      res.json({ message: 'Package deleted successfully' });
-    });
-  });
-});
-
-// ==================== VEHICLE ROUTES ====================
-
-// Get all vehicles
-app.get('/api/vehicles', authenticateToken, (req, res) => {
-  const query = 'SELECT * FROM Vehicle ORDER BY PlateNumber';
-
-  db.query(query, (err, results) => {
-    if (err) {
-      console.error('Database error:', err);
-      return res.status(500).json({ message: 'Internal server error' });
-    }
+// Fuel Pumps routes
+app.get('/api/pumps', requireAuth, (req, res) => {
+  db.query(`SELECT p.*, f.Name as FuelTypeName FROM FuelPump p
+            LEFT JOIN FuelType f ON p.FuelTypeID = f.FuelTypeID`, (err, results) => {
+    if (err) return res.status(500).json({ error: 'Database error' });
     res.json(results);
   });
 });
 
-// Get single vehicle
-app.get('/api/vehicles/:plateNumber', authenticateToken, (req, res) => {
-  const plateNumber = req.params.plateNumber;
-  const query = 'SELECT * FROM Vehicle WHERE PlateNumber = ?';
-
-  db.query(query, [plateNumber], (err, results) => {
-    if (err) {
-      console.error('Database error:', err);
-      return res.status(500).json({ message: 'Internal server error' });
-    }
-
-    if (results.length === 0) {
-      return res.status(404).json({ message: 'Vehicle not found' });
-    }
-
-    res.json(results[0]);
+app.post('/api/pumps', requireAuth, (req, res) => {
+  const { PumpNumber, FuelTypeID, Status } = req.body;
+  db.query('INSERT INTO FuelPump (PumpNumber, FuelTypeID, Status) VALUES (?, ?, ?)',
+    [PumpNumber, FuelTypeID, Status], (err, result) => {
+    if (err) return res.status(500).json({ error: 'Database error' });
+    res.json({ message: 'Pump added', id: result.insertId });
   });
 });
 
-// Create new vehicle
-app.post('/api/vehicles', authenticateToken, (req, res) => {
-  const { PlateNumber, VehicleType, DriverName, PhoneNumber } = req.body;
+app.put('/api/pumps/:id', requireAuth, (req, res) => {
+  const { PumpNumber, FuelTypeID, Status } = req.body;
+  db.query('UPDATE FuelPump SET PumpNumber = ?, FuelTypeID = ?, Status = ? WHERE PumpID = ?',
+    [PumpNumber, FuelTypeID, Status, req.params.id], (err) => {
+    if (err) return res.status(500).json({ error: 'Database error' });
+    res.json({ message: 'Pump updated' });
+  });
+});
 
-  if (!PlateNumber || !VehicleType || !DriverName) {
-    return res.status(400).json({ message: 'Plate number, vehicle type, and driver name are required' });
-  }
+// Customers routes
+app.get('/api/customers', requireAuth, (req, res) => {
+  db.query('SELECT * FROM Customer', (err, results) => {
+    if (err) return res.status(500).json({ error: 'Database error' });
+    res.json(results);
+  });
+});
 
-  const query = 'INSERT INTO Vehicle (PlateNumber, VehicleType, DriverName, PhoneNumber) VALUES (?, ?, ?, ?)';
+app.post('/api/customers', requireAuth, (req, res) => {
+  const { Name, ContactInfo } = req.body;
+  db.query('INSERT INTO Customer (Name, ContactInfo) VALUES (?, ?)',
+    [Name, ContactInfo], (err, result) => {
+    if (err) return res.status(500).json({ error: 'Database error' });
+    res.json({ message: 'Customer added', id: result.insertId });
+  });
+});
 
-  db.query(query, [PlateNumber, VehicleType, DriverName, PhoneNumber], (err, results) => {
-    if (err) {
-      if (err.code === 'ER_DUP_ENTRY') {
-        return res.status(400).json({ message: 'Vehicle with this plate number already exists' });
-      }
-      console.error('Database error:', err);
-      return res.status(500).json({ message: 'Internal server error' });
-    }
+// Transactions routes
+app.get('/api/transactions', requireAuth, (req, res) => {
+  db.query(`SELECT t.*, c.Name as CustomerName, p.PumpNumber, f.Name as FuelTypeName
+            FROM FuelTransaction t
+            LEFT JOIN Customer c ON t.CustomerID = c.CustomerID
+            LEFT JOIN FuelPump p ON t.PumpID = p.PumpID
+            LEFT JOIN FuelType f ON p.FuelTypeID = f.FuelTypeID
+            ORDER BY t.Date DESC, t.Time DESC`, (err, results) => {
+    if (err) return res.status(500).json({ error: 'Database error' });
+    res.json(results);
+  });
+});
 
-    res.status(201).json({
-      message: 'Vehicle created successfully',
-      plateNumber: PlateNumber
+app.post('/api/transactions', requireAuth, (req, res) => {
+  const { CustomerID, PumpID, AmountLiters, TotalPrice } = req.body;
+  const date = new Date().toISOString().split('T')[0];
+  const time = new Date().toTimeString().split(' ')[0];
+
+  db.query('INSERT INTO FuelTransaction (CustomerID, PumpID, Date, Time, AmountLiters, TotalPrice) VALUES (?, ?, ?, ?, ?, ?)',
+    [CustomerID, PumpID, date, time, AmountLiters, TotalPrice], (err, result) => {
+    if (err) return res.status(500).json({ error: 'Database error' });
+
+    // Update inventory
+    db.query(`UPDATE FuelInventory fi
+              JOIN FuelPump fp ON fi.FuelTypeID = fp.FuelTypeID
+              SET fi.StockLiters = fi.StockLiters - ?, fi.LastUpdated = CURDATE()
+              WHERE fp.PumpID = ?`, [AmountLiters, PumpID], (err) => {
+      if (err) console.error('Inventory update error:', err);
     });
+
+    res.json({ message: 'Transaction added', id: result.insertId });
   });
 });
 
-// Update vehicle
-app.put('/api/vehicles/:plateNumber', authenticateToken, (req, res) => {
-  const plateNumber = req.params.plateNumber;
-  const { VehicleType, DriverName, PhoneNumber } = req.body;
+// Payments routes
+app.get('/api/payments', requireAuth, (req, res) => {
+  db.query(`SELECT p.*, t.TotalPrice, c.Name as CustomerName
+            FROM Payment p
+            LEFT JOIN FuelTransaction t ON p.TransactionID = t.TransactionID
+            LEFT JOIN Customer c ON t.CustomerID = c.CustomerID
+            ORDER BY p.PaymentDate DESC`, (err, results) => {
+    if (err) return res.status(500).json({ error: 'Database error' });
+    res.json(results);
+  });
+});
 
-  if (!VehicleType || !DriverName) {
-    return res.status(400).json({ message: 'Vehicle type and driver name are required' });
+app.post('/api/payments', requireAuth, (req, res) => {
+  const { TransactionID, CustomerID, AmountPaid, PaymentMethod, PaymentDate } = req.body;
+  const finalPaymentDate = PaymentDate || new Date().toISOString().split('T')[0];
+
+  // Validate required fields
+  if (!TransactionID || !AmountPaid || !PaymentMethod) {
+    return res.status(400).json({ error: 'Missing required fields: TransactionID, AmountPaid, PaymentMethod' });
   }
 
-  const query = 'UPDATE Vehicle SET VehicleType = ?, DriverName = ?, PhoneNumber = ? WHERE PlateNumber = ?';
-
-  db.query(query, [VehicleType, DriverName, PhoneNumber, plateNumber], (err, results) => {
+  db.query('INSERT INTO Payment (TransactionID, AmountPaid, PaymentMethod, PaymentDate) VALUES (?, ?, ?, ?)',
+    [TransactionID, AmountPaid, PaymentMethod, finalPaymentDate], (err, result) => {
     if (err) {
-      console.error('Database error:', err);
-      return res.status(500).json({ message: 'Internal server error' });
+      console.error('Payment insertion error:', err);
+      return res.status(500).json({ error: 'Database error: ' + err.message });
     }
-
-    if (results.affectedRows === 0) {
-      return res.status(404).json({ message: 'Vehicle not found' });
-    }
-
-    res.json({ message: 'Vehicle updated successfully' });
+    res.json({ message: 'Payment recorded successfully', id: result.insertId });
   });
 });
 
-// Delete vehicle
-app.delete('/api/vehicles/:plateNumber', authenticateToken, (req, res) => {
-  const plateNumber = req.params.plateNumber;
+// Inventory routes
+app.get('/api/inventory', requireAuth, (req, res) => {
+  db.query(`SELECT i.*, f.Name as FuelTypeName, f.PricePerLiter
+            FROM FuelInventory i
+            LEFT JOIN FuelType f ON i.FuelTypeID = f.FuelTypeID`, (err, results) => {
+    if (err) return res.status(500).json({ error: 'Database error' });
+    res.json(results);
+  });
+});
 
-  // Check if vehicle has any tickets
-  const checkQuery = 'SELECT COUNT(*) as count FROM ParkingTicket WHERE PlateNumber = ?';
+app.put('/api/inventory/:id', requireAuth, (req, res) => {
+  const { StockLiters } = req.body;
+  db.query('UPDATE FuelInventory SET StockLiters = ?, LastUpdated = CURDATE() WHERE InventoryID = ?',
+    [StockLiters, req.params.id], (err) => {
+    if (err) return res.status(500).json({ error: 'Database error' });
+    res.json({ message: 'Inventory updated' });
+  });
+});
 
-  db.query(checkQuery, [plateNumber], (err, results) => {
-    if (err) {
-      console.error('Database error:', err);
-      return res.status(500).json({ message: 'Internal server error' });
-    }
+// Tasks routes
+app.get('/api/tasks', requireAuth, (req, res) => {
+  db.query('SELECT * FROM StationTask ORDER BY DueDate ASC', (err, results) => {
+    if (err) return res.status(500).json({ error: 'Database error' });
+    res.json(results);
+  });
+});
 
-    if (results[0].count > 0) {
-      return res.status(400).json({ message: 'Cannot delete vehicle that has parking tickets' });
-    }
+app.post('/api/tasks', requireAuth, (req, res) => {
+  const { Description, AssignedTo, Status, DueDate } = req.body;
+  db.query('INSERT INTO StationTask (Description, AssignedTo, Status, DueDate) VALUES (?, ?, ?, ?)',
+    [Description, AssignedTo, Status, DueDate], (err, result) => {
+    if (err) return res.status(500).json({ error: 'Database error' });
+    res.json({ message: 'Task added', id: result.insertId });
+  });
+});
 
-    const deleteQuery = 'DELETE FROM Vehicle WHERE PlateNumber = ?';
+app.put('/api/tasks/:id', requireAuth, (req, res) => {
+  const { Description, AssignedTo, Status, DueDate } = req.body;
+  db.query('UPDATE StationTask SET Description = ?, AssignedTo = ?, Status = ?, DueDate = ? WHERE TaskID = ?',
+    [Description, AssignedTo, Status, DueDate, req.params.id], (err) => {
+    if (err) return res.status(500).json({ error: 'Database error' });
+    res.json({ message: 'Task updated' });
+  });
+});
 
-    db.query(deleteQuery, [plateNumber], (err, results) => {
+// Reports routes
+app.get('/api/report/daily', requireAuth, (req, res) => {
+  const { date } = req.query;
+  const reportDate = date || new Date().toISOString().split('T')[0];
+
+  const queries = {
+    transactions: `SELECT COUNT(*) as count, SUM(AmountLiters) as totalLiters, SUM(TotalPrice) as totalSales
+                   FROM FuelTransaction WHERE Date = ?`,
+    payments: `SELECT SUM(AmountPaid) as totalPayments, PaymentMethod, COUNT(*) as count
+               FROM Payment WHERE PaymentDate = ? GROUP BY PaymentMethod`,
+    inventory: `SELECT f.Name, i.StockLiters FROM FuelInventory i
+                JOIN FuelType f ON i.FuelTypeID = f.FuelTypeID`,
+    fuelSales: `SELECT f.Name, SUM(t.AmountLiters) as liters, SUM(t.TotalPrice) as sales
+                FROM FuelTransaction t
+                JOIN FuelPump p ON t.PumpID = p.PumpID
+                JOIN FuelType f ON p.FuelTypeID = f.FuelTypeID
+                WHERE t.Date = ? GROUP BY f.FuelTypeID`
+  };
+
+  const report = {};
+  let completed = 0;
+
+  Object.keys(queries).forEach(key => {
+    const params = key === 'inventory' ? [] : [reportDate];
+    db.query(queries[key], params, (err, results) => {
       if (err) {
-        console.error('Database error:', err);
-        return res.status(500).json({ message: 'Internal server error' });
+        console.error(`Error in ${key} query:`, err);
+        report[key] = [];
+      } else {
+        report[key] = results;
       }
 
-      if (results.affectedRows === 0) {
-        return res.status(404).json({ message: 'Vehicle not found' });
+      completed++;
+      if (completed === Object.keys(queries).length) {
+        res.json({ date: reportDate, ...report });
       }
-
-      res.json({ message: 'Vehicle deleted successfully' });
     });
   });
-});
-
-// Import additional routes
-const routes = require('./routes');
-
-// ==================== PARKING TICKET ROUTES ====================
-
-// Get all parking tickets
-app.get('/api/tickets', authenticateToken, (req, res) => {
-  routes.getParkingTickets(req, res, db);
-});
-
-// Get single parking ticket
-app.get('/api/tickets/:id', authenticateToken, (req, res) => {
-  routes.getParkingTicket(req, res, db);
-});
-
-// Create new parking ticket
-app.post('/api/tickets', authenticateToken, (req, res) => {
-  routes.createParkingTicket(req, res, db);
-});
-
-// Complete parking ticket (calculate fee)
-app.put('/api/tickets/:id/complete', authenticateToken, (req, res) => {
-  routes.completeParkingTicket(req, res, db);
-});
-
-// ==================== PAYMENT ROUTES ====================
-
-// Get all payments
-app.get('/api/payments', authenticateToken, (req, res) => {
-  routes.getPayments(req, res, db);
-});
-
-// Create payment
-app.post('/api/payments', authenticateToken, (req, res) => {
-  routes.createPayment(req, res, db);
-});
-
-// ==================== REPORT ROUTES ====================
-
-// Get daily report
-app.get('/api/reports/daily', authenticateToken, (req, res) => {
-  routes.getDailyReport(req, res, db);
 });
 
 // Start server
 app.listen(PORT, () => {
-  console.log(`SmartPark PTMS Server is running on port ${PORT}`);
-  console.log(`Health check: http://localhost:${PORT}/health`);
+  console.log(`Server is running on port ${PORT}`);
 });

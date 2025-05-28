@@ -1,118 +1,91 @@
-import React, { useState } from 'react';
-import { useAuth } from '../context/AuthContext';
-import { DocumentTextIcon, LockClosedIcon, UserIcon } from '@heroicons/react/24/outline';
+import { useState } from 'react'
+import axios from '../api/axios'
 
-const Login = () => {
-  const [formData, setFormData] = useState({
-    username: '',
-    password: ''
-  });
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
-  const { login } = useAuth();
-
-  const handleChange = (e) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value
-    });
-    setError('');
-  };
+function Login({ onLogin }) {
+  const [credentials, setCredentials] = useState({ username: '', password: '' })
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
 
   const handleSubmit = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    setError('');
+    e.preventDefault()
+    setLoading(true)
+    setError('')
 
-    const result = await login(formData.username, formData.password);
-
-    if (!result.success) {
-      setError(result.message);
+    try {
+      const response = await axios.post('/api/login', credentials)
+      onLogin(response.data.username)
+    } catch (error) {
+      setError(error.response?.data?.error || 'Login failed')
+    } finally {
+      setLoading(false)
     }
-
-    setLoading(false);
-  };
+  }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8">
-      <div className="sm:mx-auto sm:w-full sm:max-w-md">
-        <div className="flex justify-center">
-          <div className="bg-blue-500 p-4 rounded-full">
-            <DocumentTextIcon className="w-12 h-12 text-white" />
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-900 via-gray-900 to-black">
+      <div className="max-w-2xl w-full mx-6">
+        <div className="bg-white rounded-3xl shadow-2xl p-12 border-8 border-gray-300 hover:shadow-3xl transition-all duration-500 transform hover:-translate-y-2">
+          <div className="text-center mb-12">
+            <h1 className="text-8xl font-black text-gray-900 mb-6 tracking-tight">
+              <span className="bg-gradient-to-r from-blue-600 to-blue-800 bg-clip-text text-transparent">Smart</span>Park
+            </h1>
+            <h2 className="text-5xl font-black text-gray-800 mb-4">GSMS</h2>
+            <p className="text-2xl font-bold text-gray-600 tracking-wider uppercase">
+              Gas Station Management System
+            </p>
+            <div className="w-32 h-3 bg-gradient-to-r from-blue-600 to-blue-800 mx-auto mt-6 rounded-full shadow-lg"></div>
           </div>
-        </div>
-        <h2 className="mt-6 text-center text-4xl font-bold text-gray-900">
-          SmartPark PTMS
-        </h2>
-        <p className="mt-2 text-center text-lg text-gray-600">
-          Parking Ticket Management System
-        </p>
-      </div>
 
-      <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
-        <div className="modal-flat p-8">
-          <form className="space-y-6" onSubmit={handleSubmit}>
-            {error && (
-              <div className="alert-error">
-                {error}
-              </div>
-            )}
-
+          <form onSubmit={handleSubmit} className="space-y-10">
             <div>
-              <label htmlFor="username" className="form-label">
-                <UserIcon className="w-4 h-4 inline mr-2" />
+              <label className="block text-2xl font-black text-gray-800 mb-4 tracking-wider uppercase">
                 Username
               </label>
               <input
-                id="username"
-                name="username"
                 type="text"
+                className="w-full px-6 py-6 border-4 border-gray-400 rounded-2xl focus:border-blue-600 focus:ring-4 focus:ring-blue-200 focus:outline-none font-bold text-xl bg-white transition-all duration-300 hover:border-gray-500 focus:scale-105"
+                value={credentials.username}
+                onChange={(e) => setCredentials({ ...credentials, username: e.target.value })}
                 required
-                className="form-input"
                 placeholder="Enter your username"
-                value={formData.username}
-                onChange={handleChange}
               />
             </div>
 
             <div>
-              <label htmlFor="password" className="form-label">
-                <LockClosedIcon className="w-4 h-4 inline mr-2" />
+              <label className="block text-2xl font-black text-gray-800 mb-4 tracking-wider uppercase">
                 Password
               </label>
               <input
-                id="password"
-                name="password"
                 type="password"
+                className="w-full px-6 py-6 border-4 border-gray-400 rounded-2xl focus:border-blue-600 focus:ring-4 focus:ring-blue-200 focus:outline-none font-bold text-xl bg-white transition-all duration-300 hover:border-gray-500 focus:scale-105"
+                value={credentials.password}
+                onChange={(e) => setCredentials({ ...credentials, password: e.target.value })}
                 required
-                className="form-input"
                 placeholder="Enter your password"
-                value={formData.password}
-                onChange={handleChange}
               />
             </div>
 
-            <div>
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {loading ? (
-                  <div className="flex items-center justify-center">
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                    Signing in...
-                  </div>
-                ) : (
-                  'Sign in'
-                )}
-              </button>
-            </div>
+            {error && (
+              <div className="bg-red-50 border-8 border-red-400 text-red-800 p-6 rounded-2xl font-bold shadow-lg">
+                <p className="font-black text-xl">{error}</p>
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={loading}
+              className=" bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-black py-8 px-8 rounded-3xl transition-all duration-300 transform hover:scale-105 active:scale-95 shadow-2xl hover:shadow-3xl border-4 border-blue-800 text-3xl tracking-wider uppercase"
+            >
+              {loading ? 'LOGGING IN...' : 'LOGIN'}
+            </button>
           </form>
+
+
+
         </div>
       </div>
     </div>
-  );
-};
+  )
+}
 
-export default Login;
+export default Login
